@@ -8,8 +8,8 @@ A tiny offline-first mutation queue + idempotent server primitives. About 900 li
 npm install offline-sync-engine
 ```
 
-🎯 **[Live demo](https://offline-sync-engine.vercel.app)** — toggle WiFi off, keep scanning, watch the queue drain when WiFi comes back.
-🔌 **[FratDoor migration guide](./docs/FRATDOOR_MIGRATION.md)** — concrete swap-in for an existing IndexedDB-queue check-in app.
+🎯 **[Live demo](https://grahamzemel.github.io/offline-sync-engine/)**
+
 
 ## The problem this solves
 
