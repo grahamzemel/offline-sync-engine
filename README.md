@@ -8,6 +8,9 @@ A tiny offline-first mutation queue + idempotent server primitives. About 900 li
 npm install offline-sync-engine
 ```
 
+[![npm](https://img.shields.io/npm/v/offline-sync-engine)](https://www.npmjs.com/package/offline-sync-engine)
+[![CI](https://github.com/grahamzemel/offline-sync-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/grahamzemel/offline-sync-engine/actions/workflows/ci.yml)
+
 🎯 **[Live demo](https://grahamzemel.github.io/offline-sync-engine/)**
 
 
