@@ -102,6 +102,54 @@ app.post('/admits', async (req, res) => {
 
 `store.process` is the magic: same idempotency key sent twice → handler runs once, second call returns the cached commit with `duplicate: true`. That kills the "ack-got-lost-so-retry-and-duplicate" failure mode at the root.
 
+## ⚠️ Required: allow the idempotency header in your CORS config
+
+If your client and server are on different origins (the common case — `app.yourdomain.com` calling `api.yourdomain.com`, or `localhost:5173` calling `localhost:3000`), the browser sends a CORS **preflight** for every POST that carries a custom header. If the server doesn't explicitly whitelist `X-Idempotency-Key` (and `X-Offline-Sync-Engine` if you set it), every single request is blocked with:
+
+```
+Access to fetch at '...' has been blocked by CORS policy: Request header field
+x-idempotency-key is not allowed by Access-Control-Allow-Headers in preflight response.
+```
+
+This is the #1 thing people miss when wiring this library into an existing API. Two ways to fix it:
+
+### With the `cors` middleware
+
+```js
+import cors from 'cors';
+
+app.use(cors({
+  origin: ['https://app.example.com', 'http://localhost:5173'],
+  credentials: true,
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Idempotency-Key',        // ← required
+    'X-Offline-Sync-Engine',    // ← optional, useful for logging
+  ],
+}));
+```
+
+### With manual CORS headers
+
+```js
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin);
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.header(
+    'Access-Control-Allow-Headers',
+    'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Idempotency-Key, X-Offline-Sync-Engine'
+  );
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+```
+
+After the change, restart/redeploy your server. On the client side you'll see your queue start delivering successfully; without it, every send fails with `net::ERR_FAILED` (preflight rejection) and the library queue just keeps growing.
+
+If you only ever set the idempotency key on `same-origin` requests (e.g., reverse-proxied API behind the same domain), preflight is skipped and you don't need to touch CORS. But if `fetch()` shows the origin and host don't match, you need this.
+
 ## Optional: multi-scanner coordination
 
 If you have multiple devices, layer on `Broadcaster` + `LiveSync` for realtime fanout. Other scanners see your admits within ~50ms, and `LiveSync` auto-replays any events missed during a WiFi blip via the `MutationLog` catchup endpoint.

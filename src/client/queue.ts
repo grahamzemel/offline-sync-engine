@@ -101,6 +101,11 @@ export class OfflineQueue {
         this.online = false;
       });
     }
+
+    // Auto-drain any persisted mutations from a previous session. Without
+    // this, entries written before a tab close just sit in IndexedDB until
+    // the user happens to scan something new — surprising and easy to miss.
+    this.scheduleFlush(0);
   }
 
   /**
