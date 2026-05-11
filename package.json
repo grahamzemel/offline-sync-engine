@@ -1,0 +1,66 @@
+{
+  "name": "offline-sync-engine",
+  "version": "0.1.0",
+  "description": "Offline-first mutation queue + idempotent server sync for event check-in, POS, and access-control apps. Survives flaky WiFi, prevents duplicate writes, reconciles cleanly on reconnect.",
+  "keywords": [
+    "offline-first",
+    "sync",
+    "idempotency",
+    "local-first",
+    "indexeddb",
+    "sse",
+    "event-sourcing",
+    "check-in",
+    "pos",
+    "access-control"
+  ],
+  "license": "MIT",
+  "author": "Graham Zemel",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/grahamzemel/offline-sync-engine"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js"
+    },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "import": "./dist/server/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  },
+  "peerDependencies": {
+    "idb": "^8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "idb": {
+      "optional": true
+    }
+  }
+}

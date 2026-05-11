@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>offline-sync-engine — keep scanning when WiFi dies</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <header class="page-header">
+      <h1>offline-sync-engine</h1>
+      <p class="lede">
+        A door scanner that <em>keeps working</em> when the venue's WiFi dies.
+        Pull the plug. Scan a few people. Plug it back in. Every admit lands
+        in the server exactly once.
+      </p>
+    </header>
+
+    <section class="controls">
+      <button id="wifi-btn" class="btn-wifi" data-state="online">
+        <span class="dot"></span><span class="label">WiFi: ONLINE</span>
+      </button>
+      <label class="toggle">
+        <input type="checkbox" id="library-toggle" />
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        <span class="toggle-label">Use offline-sync-engine</span>
+      </label>
+      <button id="reset-btn" class="btn-secondary">Reset</button>
+    </section>
+
+    <section class="walkthrough" id="walkthrough">
+      <strong>Try this:</strong>
+      <ol>
+        <li>Click <em>Admit</em> on a few guests below — they sync immediately.</li>
+        <li>Click <em>WiFi: ONLINE</em> to flip it OFFLINE.</li>
+        <li>Keep admitting guests. They queue locally.</li>
+        <li>Click WiFi to bring it back. Watch the queue drain.</li>
+        <li>Flip <em>Use offline-sync-engine</em> off and try the same flow — see the difference.</li>
+      </ol>
+    </section>
+
+    <main class="main-grid">
+      <section class="panel scanner-panel">
+        <div class="panel-header">
+          <h2>Door Scanner</h2>
+          <span class="queue-pill" id="queue-pill">0 pending</span>
+        </div>
+        <div id="guests" class="guests"></div>
+      </section>
+
+      <section class="panel server-panel">
+        <div class="panel-header">
+          <h2>Server Ledger</h2>
+          <span class="stat" id="server-count">0 admits</span>
+        </div>
+        <div class="dup-banner" id="dup-banner" hidden>
+          ⚠ <strong id="dup-count">0</strong> duplicate admit<span id="dup-plural">s</span> recorded
+        </div>
+        <ul id="ledger" class="ledger"></ul>
+      </section>
+    </main>
+
+    <section class="explainer">
+      <h3>What's happening?</h3>
+      <div class="explainer-grid">
+        <div>
+          <h4>Library OFF</h4>
+          <ul>
+            <li>Tap <em>Admit</em> while offline → the request <strong>fails</strong> and the admit is silently lost (or piles up in a naive retry array).</li>
+            <li>On reconnect, naive retries can re-send admits the server already received but couldn't ack — producing duplicates.</li>
+            <li>No idempotency key means the server can't tell a retry apart from a fresh admit.</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Library ON</h4>
+          <ul>
+            <li>Tap <em>Admit</em> → mutation gets a client-generated ULID and is persisted in IndexedDB. The UI updates optimistically. Returns instantly.</li>
+            <li>Offline? Queue drains automatically when the network returns. Browser refresh? Queue survives.</li>
+            <li>Same key sent twice (because an ack got lost) → server returns the cached commit. <strong>Exactly-once.</strong></li>
+          </ul>
+        </div>
+      </div>
+      <p class="footer-note">
+        Everything in this demo — scanner, queue, server, network — runs in
+        your browser. The WiFi button just gates whether outgoing requests
+        succeed. There's no actual backend, but the queue/server primitives
+        you're seeing are the real library code from
+        <a href="https://github.com/grahamzemel/offline-sync-engine">offline-sync-engine</a>.
+      </p>
+    </section>
+  </body>
+  <script type="module" src="/src/main.ts"></script>
+</html>
