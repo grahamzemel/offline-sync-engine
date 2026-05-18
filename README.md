@@ -9,9 +9,37 @@ npm install offline-sync-engine
 ```
 
 [![npm](https://img.shields.io/npm/v/offline-sync-engine)](https://www.npmjs.com/package/offline-sync-engine)
+[![downloads](https://img.shields.io/npm/dm/offline-sync-engine)](https://npm-stat.com/charts.html?package=offline-sync-engine)
 [![CI](https://github.com/grahamzemel/offline-sync-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/grahamzemel/offline-sync-engine/actions/workflows/ci.yml)
 
-🎯 **[Live demo](https://grahamzemel.github.io/offline-sync-engine/)**
+🎯 **[Live demo](https://grahamzemel.github.io/offline-sync-engine/)** · 📈 **[Download trends](https://npm-stat.com/charts.html?package=offline-sync-engine)**
+
+## Is this for you?
+
+Use this if **all** of these are true:
+
+- [ ] You have a web or mobile-web app that performs user-initiated mutations (check-ins, orders, votes, form saves, attendance, etc.).
+- [ ] Some of your users are on flaky / intermittent networks (event venues, warehouses, in-store, vehicles, rural).
+- [ ] Losing a mutation or accidentally double-applying one would be bad (refunds, duplicate admits, missing orders).
+- [ ] You control the backend (Node/Express today; any HTTP server if you port the ~30-line server primitives).
+- [ ] Your client runs in a modern browser with IndexedDB (basically everything since ~2017).
+
+If you only need read-cache offline (showing data when offline) and don't have writes, you don't need this — a service worker is enough.
+
+## Step-by-step setup (~15 min)
+
+> Stuck on any step? Paste this README + your existing fetch call + route handler into [Claude.ai](https://claude.ai) and ask it to wire the library into your code. It works well for this.
+
+1. **Install.**
+   ```
+   npm install offline-sync-engine
+   ```
+2. **Server — add the idempotency store and a POST endpoint** (see [Server example](#server-express) below). Pick `MemoryIdempotencyBackend` to start; swap in Redis/Postgres/Firestore later.
+3. **Server — allow the idempotency header in CORS.** This is the #1 thing people miss. See [CORS section](#-required-allow-the-idempotency-header-in-your-cors-config) below.
+4. **Client — open IndexedDB storage and create the queue** (see [Client example](#client) below).
+5. **Replace your existing `fetch('/admits', ...)` call with `queue.enqueue('admit', payload)`.** That's the whole behavioral change in your scanner / form / order code.
+6. **Test offline.** In Chrome DevTools → Network → set to "Offline." Perform a mutation. You should see it queued (UI updates immediately). Switch back to "Online." Watch it flush in the Network tab — you'll see one batched POST with your mutation(s).
+7. **(Optional) Add multi-device sync.** Only if you have multiple scanners/devices that need realtime coordination — see [the optional section](#optional-multi-scanner-coordination).
 
 
 ## The problem this solves
