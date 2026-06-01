@@ -8,13 +8,11 @@
  *
  *   Library OFF → "naive" baseline a typical app might ship: try the network,
  *                 if it fails push the request onto an in-memory backlog and
- *                 retry on a timer. On reconnect, drain the backlog. The two
- *                 ways this fails:
+ *                 retry on a timer. Failure modes:
  *                   (a) loses admits if you reload the tab while offline
- *                   (b) double-submits when a network error happens *after*
- *                       the server already received the request — because
- *                       there's no idempotency key, the retry shows up to
- *                       the server as a brand-new admit.
+ *                   (b) double-submits when the server got the request but
+ *                       the response failed in transit — the retry has no
+ *                       idempotency context so the server inserts again.
  */
 import { OfflineQueue, MemoryQueueStorage, ulid } from 'offline-sync-engine/client';
 import type { Mutation, CommitResult } from 'offline-sync-engine/client';
@@ -26,6 +24,12 @@ export interface ScannerEvent {
   guestName: string;
   detail?: string;
   at: number;
+}
+
+export interface PendingItem {
+  idempotencyKey: string;
+  guestName: string;
+  clientTs: number;
 }
 
 export class Scanner {
@@ -66,7 +70,7 @@ export class Scanner {
           kind: 'commit',
           guestName: (m as Mutation<AdmitPayload>).payload.guestName,
           detail: result.duplicate
-            ? `server already had this one (seq ${result.seqId})`
+            ? `server already had it (seq ${result.seqId}) — idempotency saved us`
             : `recorded as seq ${result.seqId}`,
           at: Date.now(),
         });
@@ -96,6 +100,27 @@ export class Scanner {
   async pendingCount(): Promise<number> {
     if (this.getUseLibrary()) return this.queue ? await this.queue.size() : 0;
     return this.naiveBacklog.length;
+  }
+
+  /** What's sitting in the queue, with names for the UI. */
+  async getPending(): Promise<PendingItem[]> {
+    if (this.getUseLibrary()) {
+      if (!this.queue) return [];
+      const items = await this.queue.pending();
+      return items.map((m) => {
+        const mp = m as Mutation<AdmitPayload>;
+        return {
+          idempotencyKey: mp.idempotencyKey,
+          guestName: mp.payload.guestName,
+          clientTs: mp.clientTs,
+        };
+      });
+    }
+    return this.naiveBacklog.map((m) => ({
+      idempotencyKey: m.idempotencyKey,
+      guestName: m.payload.guestName,
+      clientTs: m.clientTs,
+    }));
   }
 
   onEvent(fn: (e: ScannerEvent) => void): () => void {
@@ -134,7 +159,7 @@ export class Scanner {
     this.pushEvent({
       kind: 'queued',
       guestName: payload.guestName,
-      detail: this.getOnline() ? 'sending…' : 'offline — buffered (in-memory, lost on reload)',
+      detail: this.getOnline() ? 'sending…' : 'offline — in-memory (lost on reload)',
       at: Date.now(),
     });
     this.naiveBacklog.push(mutation);
@@ -142,12 +167,11 @@ export class Scanner {
   }
 
   /**
-   * Naive drain loop — represents the kind of code a developer would write
-   * if they hadn't thought hard about idempotency. The bug is in the catch
-   * branch: when a request fails, we DON'T know if the server received it
-   * and the ack got lost, or if it never got there. So a retry could
-   * produce a duplicate. We do the retry anyway because losing admits is
-   * worse than duplicating them, and watch the dup counter climb.
+   * Naive drain loop. Just retry on any error — no idempotency.
+   * The duplicates emerge naturally: the server simulates "ack lost"
+   * by inserting the record and then throwing, and the retry inserts
+   * a fresh row because nothing on the server knows it was already
+   * processed.
    */
   private async naiveDrain() {
     if (this.naiveDraining) return;
@@ -161,37 +185,20 @@ export class Scanner {
           this.pushEvent({
             kind: 'commit',
             guestName: m.payload.guestName,
-            detail: 'sent (no dedup on server — hopes for the best)',
+            detail: 'sent (no dedup — server takes what it gets)',
             at: Date.now(),
           });
-        } catch {
+        } catch (e) {
+          const msg = (e as Error).message;
           this.pushEvent({
             kind: 'retrying',
             guestName: m.payload.guestName,
-            detail: 'network error; will retry',
+            detail: msg === 'ack-lost'
+              ? 'ack lost — retrying (may produce duplicate)'
+              : 'offline — waiting for WiFi',
             at: Date.now(),
           });
-          // The classic ack-lost race: simulate the server having actually
-          // accepted our previous attempt while the response failed in
-          // transit. The retry pushes the same payload through, and the
-          // naive server inserts it AGAIN. Library mode catches this via
-          // the idempotency key.
-          if (this.getOnline() && Math.random() < 0.4) {
-            try {
-              await this.server.submit(m);
-              this.naiveBacklog.shift();
-              this.pushEvent({
-                kind: 'commit',
-                guestName: m.payload.guestName,
-                detail: 'retried — but the first try may have also landed',
-                at: Date.now(),
-              });
-              continue;
-            } catch {
-              /* still down */
-            }
-          }
-          await new Promise((r) => setTimeout(r, 400));
+          await new Promise((r) => setTimeout(r, 350));
           if (!this.getOnline()) return; // stop trying until WiFi comes back
         }
       }
@@ -201,13 +208,18 @@ export class Scanner {
   }
 
   private async sendBatch(batch: Mutation[]): Promise<CommitResult[]> {
-    // For library mode: simulate a single round-trip per batch. The server's
-    // own WiFi gate (wifiOnline) does the actual failure injection.
-    const results: CommitResult[] = [];
+    // Per-item submit. Items that hit ack-lost return undefined; the
+    // queue keeps them in storage with attempts++ and schedules a retry.
+    // Items that succeed commit cleanly and get removed. Either way, the
+    // IdempotencyStore on the server guarantees zero duplicates.
+    const results: (CommitResult | undefined)[] = [];
     for (const m of batch) {
-      const res = await this.server.submit(m as Mutation<AdmitPayload>);
-      results.push(res);
+      try {
+        results.push(await this.server.submit(m as Mutation<AdmitPayload>));
+      } catch {
+        results.push(undefined);
+      }
     }
-    return results;
+    return results as CommitResult[];
   }
 }

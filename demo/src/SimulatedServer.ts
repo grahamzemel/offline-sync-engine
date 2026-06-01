@@ -2,13 +2,21 @@
  * In-browser stand-in for what would be your Express/Fastify backend.
  *
  * Holds the truth: which guests have been admitted, in what order. Exposes
- * a single `submit(mutation)` that the scanner calls. The WiFi switch in
- * the UI gates whether `submit` actually delivers — when WiFi is OFF, we
- * throw an error to simulate the request never reaching the server.
+ * a single `submit(mutation)` that the scanner calls.
  *
- * In library mode it uses IdempotencyStore to dedupe retries. In naive
- * mode it just inserts whatever it gets, so retries produce duplicate
- * admits — exactly the failure mode the library fixes.
+ * Two failure modes are simulated:
+ *
+ *   1. WiFi OFF — the request never reaches the server (throw 'network').
+ *
+ *   2. "Ack lost" — the server FULLY processes the request, but the response
+ *      fails in transit. The client sees a network error and retries. This
+ *      is the realistic failure that idempotency keys solve. We fire it
+ *      with ~25% probability per online request so the demo actually
+ *      produces duplicates in naive mode within a few admits.
+ *
+ * In library mode, IdempotencyStore catches the retry and returns the
+ * cached commit. In naive mode, the retry produces a fresh insert →
+ * duplicate. That's the whole story the demo is trying to tell.
  */
 import {
   IdempotencyStore,
@@ -28,6 +36,8 @@ export interface AdmitRecord {
   guestName: string;
   serverTs: number;
 }
+
+const ACK_LOST_CHANCE = 0.25;
 
 export class SimulatedServer {
   wifiOnline = true;
@@ -66,23 +76,16 @@ export class SimulatedServer {
   }
 
   async submit(mutation: Mutation<AdmitPayload>): Promise<CommitResult<AdmitRecord>> {
-    // Simulated WiFi outage: drop the request entirely.
     if (!this.wifiOnline) {
-      // Tiny delay so the UI can show "trying..." briefly.
       await new Promise((r) => setTimeout(r, 50));
       throw new Error('network');
     }
-    // Realistic round-trip latency.
     await new Promise((r) => setTimeout(r, 80 + Math.random() * 60));
 
     if (this.useLibrary) {
-      return this.store.process<AdmitRecord>(
+      const result = await this.store.process<AdmitRecord>(
         mutation.idempotencyKey,
         async () => {
-          // The library guarantees this handler runs at most once per
-          // idempotency key. We can safely insert without worrying about
-          // duplicate-from-retry — only domain-level dups (same guest from
-          // a fresh scan event) reach us here.
           const isGuestDup = this.records.some(
             (r) => r.guestId === mutation.payload.guestId
           );
@@ -103,11 +106,18 @@ export class SimulatedServer {
           this.emit();
           return rec;
         },
-        async () => 0 // seqId already assigned inside handler
+        async () => 0
       );
+      // Ack-lost: server is done, response fails in transit. Retry will
+      // hit the IdempotencyStore and get the cached commit back. No
+      // duplicate ever lands.
+      if (Math.random() < ACK_LOST_CHANCE) {
+        throw new Error('ack-lost');
+      }
+      return result;
     }
 
-    // Naive mode: blindly insert.
+    // Naive mode: blindly insert, no server-side dedup.
     const isGuestDup = this.records.some(
       (r) => r.guestId === mutation.payload.guestId
     );
@@ -121,6 +131,11 @@ export class SimulatedServer {
     if (isGuestDup) this.duplicateAdmits++;
     this.records.push(rec);
     this.emit();
+    // Same ack-lost simulation: the request landed, but the client never
+    // hears back. Naive mode retries on next drain → inserts AGAIN.
+    if (Math.random() < ACK_LOST_CHANCE) {
+      throw new Error('ack-lost');
+    }
     return {
       idempotencyKey: mutation.idempotencyKey,
       seqId,

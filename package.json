@@ -1,6 +1,6 @@
 {
   "name": "offline-sync-engine",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Offline-first mutation queue + idempotent server sync for event check-in, POS, and access-control apps. Survives flaky WiFi, prevents duplicate writes, reconciles cleanly on reconnect.",
   "keywords": [
     "offline-first",

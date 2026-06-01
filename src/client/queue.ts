@@ -210,6 +210,7 @@ export class OfflineQueue {
       }
 
       // Per-mutation result processing
+      let anyMissing = false;
       for (let i = 0; i < batch.length; i++) {
         const entry = batch[i];
         const result = results[i];
@@ -218,6 +219,7 @@ export class OfflineQueue {
           entry.lastError = 'No result from sender';
           entry.lastAttemptAt = Date.now();
           await this.storage.put(entry);
+          anyMissing = true;
           continue;
         }
         entry.committedSeqId = result.seqId;
@@ -229,9 +231,11 @@ export class OfflineQueue {
       // Reset backoff after success
       this.currentBackoffMs = this.initialBackoffMs;
 
-      // More to drain?
-      if (ready.length > batch.length) {
-        this.scheduleFlush(0);
+      // More to drain? Either there are entries beyond this batch, or the
+      // sender returned undefined for some items (partial success) — those
+      // still need a retry.
+      if (ready.length > batch.length || anyMissing) {
+        this.scheduleFlush(anyMissing ? this.initialBackoffMs : 0);
       }
     } finally {
       this.isFlushing = false;

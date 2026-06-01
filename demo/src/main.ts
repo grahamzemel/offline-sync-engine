@@ -88,32 +88,71 @@ function renderGuests() {
     const guest = GUESTS.find((g) => g.id === id);
     if (!guest) return;
     void scanner.admit({ guestId: guest.id, guestName: guest.name });
-    render();
+    void render();
   });
 }
 
-// --- Ledger + counters
+const formatTime = (ts: number) =>
+  new Date(ts).toLocaleTimeString('en-US', {
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+
+// --- Render loop
 async function render() {
+  // Mode pill on the scanner
+  const modePill = $('#scanner-mode-pill');
+  modePill.textContent = useLibrary ? 'library mode' : 'naive mode';
+  modePill.className = useLibrary ? 'stat mode-on' : 'stat mode-off';
+
+  // Storage hint on the pending panel
+  const storageHint = $('#pending-storage-hint');
+  storageHint.textContent = useLibrary
+    ? 'In IndexedDB — survives reload.'
+    : 'In-memory — refreshing the tab loses these.';
+
+  // Pending list
+  const pending = await scanner.getPending();
+  const pendingEl = $<HTMLUListElement>('#pending-list');
+  pendingEl.innerHTML = '';
+  for (const p of pending) {
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <div class="pending-row">
+        <span class="pending-name">${p.guestName}</span>
+        <span class="pending-time">${formatTime(p.clientTs)}</span>
+      </div>
+      <div class="pending-key" title="Idempotency key">${p.idempotencyKey.slice(0, 12)}…</div>
+    `;
+    pendingEl.appendChild(li);
+  }
+  $('#pending-empty').toggleAttribute('hidden', pending.length > 0);
+
+  // Queue pill
+  const queuePill = $('#queue-pill');
+  queuePill.textContent = String(pending.length);
+  queuePill.classList.toggle('queue-active', pending.length > 0);
+
+  // Ledger
   const ledger = server.ledger();
-  const ledgerEl = $('#ledger');
+  const ledgerEl = $<HTMLUListElement>('#ledger');
   ledgerEl.innerHTML = '';
   for (const r of ledger.slice(-15).reverse()) {
     const li = document.createElement('li');
-    const time = new Date(r.serverTs).toLocaleTimeString('en-US', {
-      hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
     li.innerHTML = `
       <span class="seq">#${r.seqId}</span>
       <span class="who">${r.guestName}</span>
-      <span class="when">${time}</span>
+      <span class="when">${formatTime(r.serverTs)}</span>
     `;
     ledgerEl.appendChild(li);
   }
+  $('#ledger-empty').toggleAttribute('hidden', ledger.length > 0);
 
-  $('#server-count').textContent = `${server.totalRecorded()} admit${server.totalRecorded() === 1 ? '' : 's'}`;
+  // Server counters
+  const total = server.totalRecorded();
+  $('#server-count').textContent = `${total} admit${total === 1 ? '' : 's'}`;
 
   const dups = server.duplicateCount();
   const banner = $('#dup-banner');
@@ -124,10 +163,6 @@ async function render() {
   } else {
     banner.setAttribute('hidden', '');
   }
-
-  const pending = await scanner.pendingCount();
-  $('#queue-pill').textContent = `${pending} pending`;
-  $('#queue-pill').classList.toggle('queue-active', pending > 0);
 
   // Per-guest count under each name
   const countByGuest = new Map<string, number>();
@@ -151,12 +186,12 @@ async function render() {
   }
 }
 
-server.onChange(() => render());
-scanner.onEvent(() => render());
+server.onChange(() => void render());
+scanner.onEvent(() => void render());
 
 // Boot
 renderGuests();
-render();
+void render();
 
 // Drive the pending-count UI smoothly (queue size is async).
-setInterval(render, 400);
+setInterval(() => void render(), 400);

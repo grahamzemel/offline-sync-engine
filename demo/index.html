@@ -12,7 +12,7 @@
       <p class="lede">
         A door scanner that <em>keeps working</em> when the venue's WiFi dies.
         Pull the plug. Scan a few people. Plug it back in. Every admit lands
-        in the server exactly once.
+        in the server <strong>exactly once</strong>.
       </p>
       <p class="badges">
         <a href="https://www.npmjs.com/package/offline-sync-engine">
@@ -26,6 +26,7 @@
         </a>
       </p>
     </header>
+
     <section class="controls">
       <button id="wifi-btn" class="btn-wifi" data-state="online">
         <span class="dot"></span><span class="label">WiFi: ONLINE</span>
@@ -35,17 +36,17 @@
         <span class="toggle-track"><span class="toggle-thumb"></span></span>
         <span class="toggle-label">Use offline-sync-engine</span>
       </label>
-      <button id="reset-btn" class="btn-secondary">Reset</button>
+      <button id="reset-btn" class="btn-secondary">Reset demo</button>
     </section>
 
     <section class="walkthrough" id="walkthrough">
-      <strong>Try this:</strong>
+      <strong>Try this →</strong>
       <ol>
-        <li>Click <em>Admit</em> on a few guests below — they sync immediately.</li>
-        <li>Click <em>WiFi: ONLINE</em> to flip it OFFLINE.</li>
-        <li>Keep admitting guests. They queue locally.</li>
-        <li>Click WiFi to bring it back. Watch the queue drain.</li>
-        <li>Flip <em>Use offline-sync-engine</em> off and try the same flow — see the difference.</li>
+        <li>Admit a few guests. Flip WiFi <em>OFFLINE</em>. Admit more.</li>
+        <li>Watch them stack in the <em>Pending Queue</em> column.</li>
+        <li>Flip WiFi back <em>ONLINE</em>. Queue drains into the server ledger.</li>
+        <li>Now flip <em>Use offline-sync-engine</em> off and try the same flow.</li>
+        <li>Watch duplicates pile up — the ack-lost race a real flaky network produces.</li>
       </ol>
     </section>
 
@@ -53,9 +54,20 @@
       <section class="panel scanner-panel">
         <div class="panel-header">
           <h2>Door Scanner</h2>
-          <span class="queue-pill" id="queue-pill">0 pending</span>
+          <span class="stat" id="scanner-mode-pill">library mode</span>
         </div>
+        <p class="panel-hint">Tap a guest to admit them.</p>
         <div id="guests" class="guests"></div>
+      </section>
+
+      <section class="panel pending-panel">
+        <div class="panel-header">
+          <h2>Pending Queue</h2>
+          <span class="queue-pill" id="queue-pill">0</span>
+        </div>
+        <p class="panel-hint" id="pending-storage-hint">In IndexedDB — survives reload.</p>
+        <ul id="pending-list" class="pending-list"></ul>
+        <p class="empty-state" id="pending-empty">No items waiting.<br /><span>Items waiting on the network show up here with their idempotency key.</span></p>
       </section>
 
       <section class="panel server-panel">
@@ -67,35 +79,37 @@
           ⚠ <strong id="dup-count">0</strong> duplicate admit<span id="dup-plural">s</span> recorded
         </div>
         <ul id="ledger" class="ledger"></ul>
+        <p class="empty-state" id="ledger-empty">Server is empty.<br /><span>Admits committed by the server land here, newest first.</span></p>
       </section>
     </main>
 
     <section class="explainer">
-      <h3>What's happening?</h3>
+      <h3>What's happening under the hood?</h3>
       <div class="explainer-grid">
-        <div>
-          <h4>Library OFF</h4>
+        <div class="explainer-col explainer-bad">
+          <h4>Library <em>OFF</em> — naive baseline</h4>
           <ul>
-            <li>Tap <em>Admit</em> while offline → the request <strong>fails</strong> and the admit is silently lost (or piles up in a naive retry array).</li>
-            <li>On reconnect, naive retries can re-send admits the server already received but couldn't ack — producing duplicates.</li>
-            <li>No idempotency key means the server can't tell a retry apart from a fresh admit.</li>
+            <li>Admits go to an <strong>in-memory</strong> array. Refresh the tab while offline and they're gone.</li>
+            <li>No idempotency key on the server. When a response gets lost in transit, the retry inserts the same admit a second time.</li>
+            <li>You'll see the duplicate counter climb every few drains.</li>
           </ul>
         </div>
-        <div>
-          <h4>Library ON</h4>
+        <div class="explainer-col explainer-good">
+          <h4>Library <em>ON</em></h4>
           <ul>
-            <li>Tap <em>Admit</em> → mutation gets a client-generated ULID and is persisted in IndexedDB. The UI updates optimistically. Returns instantly.</li>
-            <li>Offline? Queue drains automatically when the network returns. Browser refresh? Queue survives.</li>
-            <li>Same key sent twice (because an ack got lost) → server returns the cached commit. <strong>Exactly-once.</strong></li>
+            <li>Each mutation gets a <strong>ULID</strong> at creation, persisted to <strong>IndexedDB</strong>. Survives reload, crash, tab close.</li>
+            <li>Server's <code>IdempotencyStore</code> reserves the key, runs the handler at most once, and caches the result for any retry with the same key.</li>
+            <li>Lost response? Retry returns the cached commit. Duplicates impossible.</li>
           </ul>
         </div>
       </div>
       <p class="footer-note">
         Everything in this demo — scanner, queue, server, network — runs in
-        your browser. The WiFi button just gates whether outgoing requests
-        succeed. There's no actual backend, but the queue/server primitives
-        you're seeing are the real library code from
-        <a href="https://github.com/grahamzemel/offline-sync-engine">offline-sync-engine</a>.
+        your browser. The WiFi button gates outgoing requests. The simulated
+        server also drops ~25% of responses in transit when online (an
+        "ack-lost" event) — that's the realistic flaky-network failure that
+        idempotency keys exist to solve. Source code at
+        <a href="https://github.com/grahamzemel/offline-sync-engine">github.com/grahamzemel/offline-sync-engine</a>.
       </p>
     </section>
   </body>
